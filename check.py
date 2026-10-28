@@ -50,18 +50,13 @@ def log(*args):
 def analyse_page():
     """Retourne (état, détail) avec état parmi dispo, file, rupture, bloqué."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True, args=["--disable-blink-features=AutomationControlled"]
-        )
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             locale="fr-FR",
             timezone_id="Europe/Paris",
             user_agent=USER_AGENT,
             viewport={"width": 1366, "height": 900},
             extra_http_headers={"Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8"},
-        )
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
         )
         page = context.new_page()
         try:
@@ -85,6 +80,7 @@ def analyse_page():
             text = ""
         title = page.title()
         log(f"Titre : {title!r} — {len(text)} caractères de texte")
+        log("Début du texte :", " ".join(text.split())[:300])
 
         DEBUG_DIR.mkdir(exist_ok=True)
         (DEBUG_DIR / "page.html").write_text(html, encoding="utf-8")
