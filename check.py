@@ -5,10 +5,12 @@ import base64
 import json
 import os
 import re
+import smtplib
 import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from pathlib import Path
 
 from playwright.sync_api import TimeoutError as PWTimeout
@@ -143,10 +145,43 @@ def save_state(state):
 
 
 def notify(title, message, tags):
-    topic = os.environ.get("NTFY_TOPIC", "").strip()
-    if not topic:
-        log("NTFY_TOPIC absent : notification NON envoyée")
+    """Envoie sur chaque canal configuré (ntfy, e-mail). Vrai si au moins un envoi a réussi."""
+    channels = []
+    if os.environ.get("NTFY_TOPIC", "").strip():
+        channels.append(notify_ntfy)
+    if os.environ.get("MAIL_TO", "").strip():
+        channels.append(notify_mail)
+    if not channels:
+        log("Ni NTFY_TOPIC ni MAIL_TO : notification NON envoyée")
         return False
+    results = [send(title, message, tags) for send in channels]
+    return any(results)
+
+
+def notify_mail(title, message, tags):
+    to = os.environ["MAIL_TO"].strip()
+    host = os.environ.get("SMTP_HOST", "").strip()
+    user = os.environ.get("SMTP_USER", "").strip()
+    msg = EmailMessage()
+    msg["Subject"] = title
+    msg["From"] = os.environ.get("MAIL_FROM", "").strip() or user or to
+    msg["To"] = to
+    msg.set_content(f"{message}\n\n{PRODUCT_URL}\n")
+    try:
+        with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587")), timeout=30) as s:
+            s.starttls()
+            if user:
+                s.login(user, os.environ.get("SMTP_PASSWORD", ""))
+            s.send_message(msg)
+        log(f"E-mail envoyé à {to}")
+        return True
+    except Exception as e:
+        log("Échec de l'envoi de l'e-mail :", e)
+        return False
+
+
+def notify_ntfy(title, message, tags):
+    topic = os.environ["NTFY_TOPIC"].strip()
     # Les en-têtes HTTP n'acceptent pas l'UTF-8 brut : encodage RFC 2047, compris par ntfy.
     enc_title = "=?UTF-8?B?" + base64.b64encode(title.encode()).decode() + "?="
     req = urllib.request.Request(

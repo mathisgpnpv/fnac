@@ -1,2 +1,5 @@
 debug/
 __pycache__/
+config.env
+.venv/
+bot.log
