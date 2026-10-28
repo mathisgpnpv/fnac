@@ -1,0 +1,63 @@
+name: Vérif stock Fnac Zelda
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fnac-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances Python
+        run: pip install -r requirements.txt
+
+      - name: Cache des navigateurs Playwright
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Installer Chromium (premier passage seulement)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install --with-deps chromium
+
+      - name: Vérifier le stock
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python check.py
+
+      - name: Enregistrer state.json si l'état a changé
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "state: $(python -c 'import json;print(json.load(open("state.json"))["status"])')"
+            git pull --rebase --quiet || true
+            git push
+          fi
+
+      - name: Garder la page analysée (debug)
+        if: github.event_name == 'workflow_dispatch' || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-page
+          path: debug/
+          retention-days: 3
